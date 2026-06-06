@@ -4,7 +4,6 @@ import React, { useEffect, useRef, useState } from "react";
 import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { useToast } from "@/components/ui/toast";
-import { ShieldCheck, User, Scale, Radio } from "lucide-react";
 
 interface MapComponentProps {
   isDrawing: boolean;
@@ -13,23 +12,25 @@ interface MapComponentProps {
   showGCP: boolean;
   showYieldOverlay: boolean;
   mapStyle: "dark" | "satellite";
-  activeCrop: "basmati" | "clove";
+  activeCrop: string;
   onPolygonCreated: (geojson: any) => void;
   ndviOverlayUrl: string | null;
   ndviBbox: number[][] | null;
+  refreshKey?: number;
+  onSelectPlot?: (geojson: any) => void;
 }
 
 export const MapComponent: React.FC<MapComponentProps> = ({
   isDrawing,
   setIsDrawing,
   showRegistry,
-  showGCP,
   showYieldOverlay,
   mapStyle,
-  activeCrop,
   onPolygonCreated,
   ndviOverlayUrl,
   ndviBbox,
+  refreshKey = 0,
+  onSelectPlot,
 }) => {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
@@ -46,6 +47,7 @@ export const MapComponent: React.FC<MapComponentProps> = ({
 
   const isDrawingRef = useRef(isDrawing);
   const onPolygonCreatedRef = useRef(onPolygonCreated);
+  const onSelectPlotRef = useRef(onSelectPlot);
 
   useEffect(() => {
     isDrawingRef.current = isDrawing;
@@ -54,6 +56,10 @@ export const MapComponent: React.FC<MapComponentProps> = ({
   useEffect(() => {
     onPolygonCreatedRef.current = onPolygonCreated;
   }, [onPolygonCreated]);
+
+  useEffect(() => {
+    onSelectPlotRef.current = onSelectPlot;
+  }, [onSelectPlot]);
 
   // Basemap URLs
   const darkStyle = "https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json";
@@ -71,8 +77,8 @@ export const MapComponent: React.FC<MapComponentProps> = ({
     const map = new maplibregl.Map({
       container: mapContainerRef.current,
       style: darkStyle,
-      center: [76.08, 29.05], // Center on Haryana, India by default
-      zoom: 8.5,
+      center: [76.45, 30.28], // Center near Patiala, Punjab
+      zoom: 11,
       pitch: 0,
       antialias: true,
     });
@@ -127,103 +133,116 @@ export const MapComponent: React.FC<MapComponentProps> = ({
         },
       });
 
-      // 2. Add source for GCP points
-      map.addSource("gcp-source", {
+      // Initialize saved plots GeoJSON source
+      map.addSource("basmatinet-source", {
         type: "geojson",
-        data: {
-          type: "FeatureCollection",
-          features: [],
-        },
+        data: { type: "FeatureCollection", features: [] }
       });
-
-      // Layer 4: Pulse ring beneath GCP
+      
       map.addLayer({
-        id: "gcp-pulse-layer",
-        type: "circle",
-        source: "gcp-source",
+        id: "basmatinet-layer",
+        type: "fill",
+        source: "basmatinet-source",
+        layout: { visibility: showRegistry ? "visible" : "none" },
         paint: {
-          "circle-radius": 12,
-          "circle-color": "#f97316",
-          "circle-opacity": 0.25,
-          "circle-stroke-width": 1,
-          "circle-stroke-color": "#ea580c",
-        },
+          "fill-color": [
+            "match",
+            ["get", "crop"],
+            "Wheat", "#f59e0b",
+            "Rice", "#8b5cf6",
+            "Clover", "#10b981",
+            "Cotton", "#06b6d4",
+            "#3b82f6" // Default blue
+          ],
+          "fill-opacity": 0.25,
+        }
       });
 
-      // Layer 5: GCP Circle Marker
       map.addLayer({
-        id: "gcp-layer",
-        type: "circle",
-        source: "gcp-source",
+        id: "basmatinet-outline",
+        type: "line",
+        source: "basmatinet-source",
+        layout: { visibility: showRegistry ? "visible" : "none" },
         paint: {
-          "circle-radius": 6,
-          "circle-color": "#f97316",
-          "circle-stroke-width": 1.5,
-          "circle-stroke-color": "#ffffff",
-        },
+          "line-color": [
+            "match",
+            ["get", "crop"],
+            "Wheat", "#fbbf24",
+            "Rice", "#a78bfa",
+            "Clover", "#34d399",
+            "Cotton", "#22d3ee",
+            "#60a5fa"
+          ],
+          "line-width": 1.5,
+        }
       });
 
-      // Fetch simulated plots & GCPs for initial active crop
-      fetchPlotsAndGCPS(activeCrop);
-
-      // Setup GCP Click Popups
-      map.on("click", "gcp-layer", (e) => {
+      // Setup Plot Click Popups
+      map.on("click", "basmatinet-layer", (e) => {
         if (!e.features || e.features.length === 0) return;
         const props = e.features[0].properties;
         const geom = e.features[0].geometry as any;
-        const coordinates = geom.coordinates;
+        const coordinates = e.lngLat;
 
         const popupHTML = `
-          <div class="flex flex-col gap-2 p-1 min-w-[200px]">
+          <div class="flex flex-col gap-2 p-1 min-w-[200px] text-zinc-100">
             <div class="flex items-center gap-1.5 border-b border-zinc-800 pb-1.5">
-              <span class="flex h-2 w-2 rounded-full bg-orange-500 animate-ping"></span>
-              <span class="text-[9px] uppercase tracking-wider font-extrabold text-orange-400">Ground Control Point</span>
+              <span class="flex h-2 w-2 rounded-full bg-emerald-500 animate-pulse"></span>
+              <span class="text-[9px] uppercase tracking-wider font-extrabold text-emerald-400">Field Details</span>
             </div>
             
             <div class="flex justify-between items-center mt-1">
               <div class="flex flex-col">
-                <span class="text-[8px] text-zinc-500 font-bold uppercase">GCP Station</span>
-                <span class="text-xs font-mono font-bold text-zinc-200 mt-0.5">${props.id}</span>
+                <span class="text-[8px] text-zinc-500 font-bold uppercase">Field Name</span>
+                <span class="text-xs font-mono font-bold text-zinc-200 mt-0.5">${props.field_name || 'Unnamed Field'}</span>
               </div>
-              <span class="text-[8px] bg-orange-950/40 text-orange-400 border border-orange-900/40 px-1.5 py-0.5 rounded-full font-bold">
-                Calibrated
+              <span class="text-[8px] bg-emerald-950/40 text-emerald-400 border border-emerald-900/40 px-1.5 py-0.5 rounded-full font-bold">
+                ${props.crop}
               </span>
             </div>
 
-            <div class="grid grid-cols-2 gap-2 mt-1 border-t border-zinc-900 pt-1.5 text-xs">
+            <div class="grid grid-cols-2 gap-2 mt-1 border-t border-zinc-900/60 pt-1.5 text-xs">
               <div class="flex flex-col">
-                <span class="text-[8px] text-zinc-600 font-extrabold uppercase">Elevation</span>
-                <span class="text-[10px] font-bold text-zinc-300 mt-0.5">${props.elevation_m} m</span>
+                <span class="text-[8px] text-zinc-500 font-extrabold uppercase">Farmer</span>
+                <span class="text-[10px] font-bold text-zinc-300 mt-0.5">${props.farmer_name}</span>
               </div>
               <div class="flex flex-col">
-                <span class="text-[8px] text-zinc-600 font-extrabold uppercase">Last Sync</span>
-                <span class="text-[10px] font-bold text-zinc-300 mt-0.5">${props.calibration_date}</span>
+                <span class="text-[8px] text-zinc-500 font-extrabold uppercase">Area</span>
+                <span class="text-[10px] font-bold text-zinc-300 mt-0.5">${parseFloat(props.acreage).toFixed(2)} Ac</span>
               </div>
             </div>
 
-            <div class="flex flex-col border-t border-zinc-900 pt-1 text-[8px] text-zinc-500 font-semibold font-mono">
-              Coordinates: [${coordinates[0].toFixed(5)}, ${coordinates[1].toFixed(5)}]
+            <div class="flex flex-col border-t border-zinc-900/60 pt-1 text-[8px] text-zinc-650 font-semibold font-mono">
+              ID: ${props.id}
             </div>
           </div>
         `;
 
         if (activePopup) activePopup.remove();
 
-        const popup = new maplibregl.Popup()
+        const popup = new maplibregl.Popup({ closeButton: false })
           .setLngLat(coordinates)
           .setHTML(popupHTML)
           .addTo(map);
 
         setActivePopup(popup);
+
+        // Fetch biomass analytics for sidebar report
+        if (onSelectPlotRef.current) {
+          onSelectPlotRef.current(geom);
+        }
       });
 
-      // Cursor styles on GCP hover
-      map.on("mouseenter", "gcp-layer", () => {
+      // Cursor styles on plots hover
+      map.on("mouseenter", "basmatinet-layer", () => {
         if (!isDrawingRef.current) map.getCanvas().style.cursor = "pointer";
       });
-      map.on("mouseleave", "gcp-layer", () => {
+      map.on("mouseleave", "basmatinet-layer", () => {
         if (!isDrawingRef.current) map.getCanvas().style.cursor = "";
       });
+
+      // Load database plots initial dataset
+      fetchPlots();
       setMapLoaded(true);
     });
 
@@ -256,7 +275,6 @@ export const MapComponent: React.FC<MapComponentProps> = ({
       const closedCoords = [...current, current[0]];
       setDrawCoords([]);
       setIsDrawing(false);
-      
       updateDrawLayer([]);
 
       const geojsonPolygon = {
@@ -329,9 +347,10 @@ export const MapComponent: React.FC<MapComponentProps> = ({
       setDrawCoords([]);
       updateDrawLayer([]);
       removeNDVIOverlay();
+      if (activePopup) activePopup.remove();
       toast({
         title: "Drawing Mode Active",
-        description: "Click to place vertices. Double-click to complete and analyze.",
+        description: "Click to place corners. Double-click to complete and save.",
         type: "info",
       });
     } else {
@@ -348,11 +367,21 @@ export const MapComponent: React.FC<MapComponentProps> = ({
       if (!map.getSource("satellite-raster")) {
         map.addSource("satellite-raster", satelliteSource);
         
+        // Find the first layer in the current style that is NOT background 
+        // to place the satellite tiles underneath road grids and text labels
         let beforeId = undefined;
-        if (map.getLayer("draw-fill-layer")) {
-          beforeId = "draw-fill-layer";
-        } else if (map.getLayer("basmatinet-layer")) {
-          beforeId = "basmatinet-layer";
+        try {
+          const style = map.getStyle();
+          if (style && style.layers) {
+            for (const layer of style.layers) {
+              if (layer.type !== "background") {
+                beforeId = layer.id;
+                break;
+              }
+            }
+          }
+        } catch (e) {
+          console.error("Failed to parse map layers", e);
         }
 
         map.addLayer(
@@ -361,7 +390,7 @@ export const MapComponent: React.FC<MapComponentProps> = ({
             type: "raster",
             source: "satellite-raster",
             paint: {
-              "raster-opacity": 0.85,
+              "raster-opacity": 0.9,
             },
           },
           beforeId
@@ -374,9 +403,9 @@ export const MapComponent: React.FC<MapComponentProps> = ({
         map.setLayoutProperty("satellite-layer", "visibility", "none");
       }
     }
-  }, [mapStyle]);
+  }, [mapStyle, mapLoaded]);
 
-  // Handle APEDA Plot Registry Visibility
+  // Handle Plot Registry Visibility
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapLoaded) return;
@@ -389,22 +418,7 @@ export const MapComponent: React.FC<MapComponentProps> = ({
     if (map.getLayer(outlineId)) {
       map.setLayoutProperty(outlineId, "visibility", showRegistry ? "visible" : "none");
     }
-  }, [showRegistry]);
-
-  // Handle GCP Point Visibility
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map || !mapLoaded) return;
-
-    const layerId = "gcp-layer";
-    const pulseId = "gcp-pulse-layer";
-    if (map.getLayer(layerId)) {
-      map.setLayoutProperty(layerId, "visibility", showGCP ? "visible" : "none");
-    }
-    if (map.getLayer(pulseId)) {
-      map.setLayoutProperty(pulseId, "visibility", showGCP ? "visible" : "none");
-    }
-  }, [showGCP]);
+  }, [showRegistry, mapLoaded]);
 
   // Handle NDVI Yield Overlay Visibility
   useEffect(() => {
@@ -415,47 +429,14 @@ export const MapComponent: React.FC<MapComponentProps> = ({
     if (map.getLayer(layerId)) {
       map.setLayoutProperty(layerId, "visibility", showYieldOverlay ? "visible" : "none");
     }
-  }, [showYieldOverlay]);
+  }, [showYieldOverlay, mapLoaded]);
 
-  // Handle Active Region/Crop Swapping (Sweeps Map Camera from India to Madagascar!)
+  // Triggered when plots are saved to SQLite DB
   useEffect(() => {
-    const map = mapRef.current;
-    if (!map || !mapLoaded) return;
-
-    // Reset overlay
-    removeNDVIOverlay();
-
-    if (activeCrop === "clove") {
-      // Sweep Map to Analanjirofo, Madagascar
-      map.flyTo({
-        center: [49.65, -17.15],
-        zoom: 9.2,
-        duration: 2500,
-        pitch: 15,
-      });
-      toast({
-        title: "Study Area: Madagascar",
-        description: "Zooming to clove agroforestry systems in the Analanjirofo coast.",
-        type: "info",
-      });
-    } else {
-      // Sweep Map back to Haryana, India
-      map.flyTo({
-        center: [76.08, 29.05],
-        zoom: 8.5,
-        duration: 2500,
-        pitch: 0,
-      });
-      toast({
-        title: "Study Area: India",
-        description: "Zooming back to Basmati rice farming clusters in Haryana & Punjab.",
-        type: "info",
-      });
+    if (mapLoaded) {
+      fetchPlots();
     }
-
-    // Refresh plot & GCP sources for this active crop!
-    fetchPlotsAndGCPS(activeCrop);
-  }, [activeCrop]);
+  }, [refreshKey, mapLoaded]);
 
   // Remove active NDVI overlay
   const removeNDVIOverlay = () => {
@@ -513,18 +494,16 @@ export const MapComponent: React.FC<MapComponentProps> = ({
       ],
       { padding: 80, duration: 1500 }
     );
-  }, [ndviOverlayUrl, ndviBbox]);
+  }, [ndviOverlayUrl, ndviBbox, mapLoaded]);
 
-  // Fetch Plots and GCPs dynamically based on selected regional crop
-  const fetchPlotsAndGCPS = async (crop: string) => {
+  // Fetch Plots from SQLite Database
+  const fetchPlots = async () => {
     const map = mapRef.current;
     if (!map) return;
 
     try {
       const backendUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-      
-      // 1. Fetch plots
-      const plotsRes = await fetch(`${backendUrl}/api/plots?crop=${crop}`);
+      const plotsRes = await fetch(`${backendUrl}/api/plots`);
       if (plotsRes.ok) {
         const plotsData = await plotsRes.json();
         const plotFeatures = plotsData.map((plot: any) => ({
@@ -532,11 +511,9 @@ export const MapComponent: React.FC<MapComponentProps> = ({
           properties: {
             id: plot.id,
             farmer_name: plot.farmer_name,
-            variety: plot.variety,
-            acreage: plot.acreage,
-            state: plot.state,
-            district: plot.district,
+            field_name: plot.field_name,
             crop: plot.crop,
+            acreage: plot.acreage
           },
           geometry: {
             type: "Polygon",
@@ -550,118 +527,10 @@ export const MapComponent: React.FC<MapComponentProps> = ({
             type: "FeatureCollection",
             features: plotFeatures,
           });
-        } else {
-          // If source not added yet (failsafe)
-          map.addSource("basmatinet-source", {
-            type: "geojson",
-            data: { type: "FeatureCollection", features: plotFeatures }
-          });
-          
-          map.addLayer({
-            id: "basmatinet-layer",
-            type: "fill",
-            source: "basmatinet-source",
-            layout: { visibility: showRegistry ? "visible" : "none" },
-            paint: {
-              "fill-color": [
-                "match",
-                ["get", "variety"],
-                "Pusa Basmati 1121 (PB1121)", "#8b5cf6",
-                "Pusa Basmati 1509 (PB1509)", "#10b981",
-                "CSR 30 (Traditional)", "#f59e0b",
-                "Pusa Basmati 1885 (PB1885)", "#f43f5e",
-                "Premium Organic Madagascar Clove (A-Grade)", "#06b6d4",
-                "Standard Madagascar Clove", "#10b981",
-                "#71717a",
-              ],
-              "fill-opacity": 0.25,
-            }
-          });
-
-          map.addLayer({
-            id: "basmatinet-outline",
-            type: "line",
-            source: "basmatinet-source",
-            layout: { visibility: showRegistry ? "visible" : "none" },
-            paint: {
-              "line-color": [
-                "match",
-                ["get", "variety"],
-                "Pusa Basmati 1121 (PB1121)", "#a78bfa",
-                "Pusa Basmati 1509 (PB1509)", "#34d399",
-                "CSR 30 (Traditional)", "#fbbf24",
-                "Pusa Basmati 1885 (PB1885)", "#fb7185",
-                "Premium Organic Madagascar Clove (A-Grade)", "#67e8f9",
-                "Standard Madagascar Clove", "#34d399",
-                "#a1a1aa",
-              ],
-              "line-width": 1.5,
-            }
-          });
-        }
-
-        // Dynamically adjust color mapping palette inside layer properties if layers exist!
-        if (map.getLayer("basmatinet-layer")) {
-          map.setPaintProperty("basmatinet-layer", "fill-color", [
-            "match",
-            ["get", "variety"],
-            "Pusa Basmati 1121 (PB1121)", "#8b5cf6",
-            "Pusa Basmati 1509 (PB1509)", "#10b981",
-            "CSR 30 (Traditional)", "#f59e0b",
-            "Pusa Basmati 1885 (PB1885)", "#f43f5e",
-            "Premium Organic Madagascar Clove (A-Grade)", "#06b6d4",
-            "Standard Madagascar Clove", "#10b981",
-            "#71717a",
-          ]);
-        }
-        if (map.getLayer("basmatinet-outline")) {
-          map.setPaintProperty("basmatinet-outline", "line-color", [
-            "match",
-            ["get", "variety"],
-            "Pusa Basmati 1121 (PB1121)", "#a78bfa",
-            "Pusa Basmati 1509 (PB1509)", "#34d399",
-            "CSR 30 (Traditional)", "#fbbf24",
-            "Pusa Basmati 1885 (PB1885)", "#fb7185",
-            "Premium Organic Madagascar Clove (A-Grade)", "#67e8f9",
-            "Standard Madagascar Clove", "#34d399",
-            "#a1a1aa",
-          ]);
         }
       }
-
-      // 2. Fetch Ground Control Points (GCPs)
-      const gcpRes = await fetch(`${backendUrl}/api/gcp-points?crop=${crop}`);
-      if (gcpRes.ok) {
-        const gcpData = await gcpRes.json();
-        const gcpFeatures = gcpData.map((gcp: any) => ({
-          type: "Feature",
-          properties: {
-            id: gcp.id,
-            crop: gcp.crop,
-            elevation_m: gcp.elevation_m,
-            calibration_date: gcp.calibration_date,
-            type: gcp.type,
-          },
-          geometry: {
-            type: "Point",
-            coordinates: gcp.coordinates,
-          },
-        }));
-
-        const gcpSource = map.getSource("gcp-source") as maplibregl.GeoJSONSource;
-        if (gcpSource) {
-          gcpSource.setData({
-            type: "FeatureCollection",
-            features: gcpFeatures,
-          });
-        }
-      }
-
-      // Remove popup when active crop switches
-      if (activePopup) activePopup.remove();
-
     } catch (err) {
-      console.error("Failed to load plots and GCPs dynamically", err);
+      console.error("Failed to load database plots", err);
     }
   };
 
