@@ -12,6 +12,7 @@ class CreatePlotRequest(BaseModel):
     farmer_name: str = Field(..., description="Name of the farmer owning the field")
     field_name: str = Field(..., description="Name of the agricultural field")
     crop: str = Field(..., description="Crop type grown on the field")
+    mobile_number: str = Field(..., description="Farmer's mobile contact number")
     geometry: GeoJSONGeometry
 
 class YieldAnalysisRequest(BaseModel):
@@ -37,8 +38,17 @@ class FarmPlot(BaseModel):
     farmer_name: str
     field_name: str
     crop: str
+    mobile_number: Optional[str] = Field(
+        None,
+        description="Farmer's mobile contact number (empty for legacy plots)"
+    )
     acreage: float
     coordinates: List[List[float]] = Field(
         ..., 
         description="Outer boundary of the farm cluster: [[lng, lat], ...]"
     )
+
+class FarmerDetails(BaseModel):
+    farmer_name: str = Field(..., description="Name of the farmer")
+    mobile_number: str = Field(..., description="Farmer's registered mobile number")
+    plots: List[FarmPlot] = Field(..., description="All plots registered to this mobile number")

@@ -1,7 +1,7 @@
 from fastapi import FastAPI, HTTPException, Response, Query
 from fastapi.middleware.cors import CORSMiddleware
-from app.models import YieldAnalysisRequest, YieldAnalysisResponse, FarmPlot, CreatePlotRequest
-from app.services.database import init_db, get_all_plots, save_plot, delete_plot
+from app.models import YieldAnalysisRequest, YieldAnalysisResponse, FarmPlot, CreatePlotRequest, FarmerDetails
+from app.services.database import init_db, get_all_plots, save_plot, delete_plot, get_farmer_by_mobile
 from app.services.geospatial import (
     calculate_geodesic_area_acres, 
     intersect_farm_plots,
@@ -78,6 +78,7 @@ def create_plot(request: CreatePlotRequest):
             farmer_name=request.farmer_name,
             field_name=request.field_name,
             crop=request.crop,
+            mobile_number=request.mobile_number,
             acreage=acres,
             coordinates=coords
         )
@@ -97,6 +98,23 @@ def remove_plot(plot_id: str):
     if not deleted:
         raise HTTPException(status_code=404, detail="Plot not found in database.")
     return {"status": "success", "message": f"Plot {plot_id} deleted successfully."}
+
+@app.get("/api/farmers/mobile/{mobile_number}", response_model=FarmerDetails)
+def get_farmer_by_mobile_number(mobile_number: str):
+    """
+    Looks up a farmer and their registered plots by mobile number.
+    """
+    farmer = get_farmer_by_mobile(mobile_number)
+    if not farmer:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No farmer found with mobile number {mobile_number}."
+        )
+    return FarmerDetails(
+        farmer_name=farmer["farmer_name"],
+        mobile_number=farmer["mobile_number"],
+        plots=[FarmPlot(**p) for p in farmer["plots"]],
+    )
 
 @app.post("/api/analyze-yield", response_model=YieldAnalysisResponse)
 def analyze_yield(request: YieldAnalysisRequest):
