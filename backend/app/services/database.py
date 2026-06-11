@@ -19,6 +19,7 @@ DB_PATH = os.path.join(DB_DIR, "farmers.db")
 def get_db_connection():
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys = ON;")
     return conn
 
 
@@ -63,6 +64,25 @@ def init_db():
         CREATE INDEX IF NOT EXISTS idx_farmer_crop
         ON farmer_crops(farmer_id)
     """)
+
+    # Crops master table
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS crops_master (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            crop_name TEXT UNIQUE NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    # Seed default crop data (idempotent insert logic)
+    default_crops = [
+        "Cotton", "Rice", "Wheat", "Carrot", "Onion",
+        "Soybean", "Sugarcane", "Maize", "Tomato", "Potato"
+    ]
+    cursor.executemany(
+        "INSERT OR IGNORE INTO crops_master (crop_name) VALUES (?)",
+        [(crop,) for crop in default_crops]
+    )
 
     conn.commit()
     conn.close()
@@ -167,6 +187,22 @@ def save_or_update_farmer(request: FarmerRegistrationRequest, farmer_id: str = N
             return final_id
     except sqlite3.Error as e:
         # Re-raise so the caller can handle the DB error
+        raise e
+    finally:
+        conn.close()
+
+
+def get_all_crops() -> List[dict]:
+    """
+    Fetches all crops from the crops_master table.
+    """
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT id, crop_name FROM crops_master ORDER BY id ASC")
+        rows = cursor.fetchall()
+        return [dict(row) for row in rows]
+    except sqlite3.Error as e:
         raise e
     finally:
         conn.close()

@@ -1,9 +1,6 @@
-from pydantic import BaseModel
-
+from pydantic import BaseModel, Field, field_validator
 from enum import Enum
 from typing import List
-
-from pydantic import BaseModel, Field
 
 
 class CropTypeEnum(str, Enum):
@@ -21,8 +18,7 @@ class FarmerRegistrationRequest(BaseModel):
 
     mobile_number: str = Field(
         ...,
-        min_length=10,
-        max_length=10,
+        pattern=r"^\d{10}$",
         description="10-digit farmer mobile number"
     )
 
@@ -45,16 +41,32 @@ class FarmerRegistrationRequest(BaseModel):
 
     latitude: float = Field(
         ...,
+        ge=-90.0,
+        le=90.0,
         description="Farmer location latitude"
     )
 
     longitude: float = Field(
         ...,
+        ge=-180.0,
+        le=180.0,
         description="Farmer location longitude"
     )
+
+    @field_validator("crop_ids")
+    @classmethod
+    def check_duplicate_crop_ids(cls, v: List[int]) -> List[int]:
+        if len(v) != len(set(v)):
+            raise ValueError("crop_ids must contain unique values")
+        return v
 
 
 class FarmerRegistrationResponse(BaseModel):
     message: str
     farmer_id: str
     mobile_number: str
+
+
+class CropResponse(BaseModel):
+    id: int
+    crop_name: str

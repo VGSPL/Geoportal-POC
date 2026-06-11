@@ -1,18 +1,20 @@
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, status, Form, File, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
 import sqlite3
 import os
 import json
 from typing import List
 from pydantic import ValidationError
 
-from app.models import FarmerRegistrationRequest, FarmerRegistrationResponse, CropTypeEnum
+from app.models import FarmerRegistrationRequest, FarmerRegistrationResponse, CropTypeEnum, CropResponse
 from app.services.database import (
     init_db,
     save_or_update_farmer,
     get_db_connection,
     generate_unique_farmer_id,
-    DB_DIR
+    DB_DIR,
+    get_all_crops
 )
 
 
@@ -30,6 +32,17 @@ app = FastAPI(
     title="Farmer Registration API",
     version="1.0.0",
     lifespan=lifespan
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:3000",
+        "http://127.0.0.1:3000"
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 
@@ -100,12 +113,32 @@ async def register_farmer(
             detail=e.errors()
         )
 
-    # 3. Validate selfie file type / extension
+    # 3. Validate selfie file type / extension and size limits
     ext = os.path.splitext(selfie.filename)[1].lower()
     if ext not in [".jpg", ".jpeg", ".png"]:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Unsupported file extension. Only JPG, JPEG, and PNG are allowed."
+        )
+
+    # Validate file size (Max 5MB)
+    try:
+        selfie.file.seek(0, 2)
+        size = selfie.file.tell()
+        selfie.file.seek(0)
+        
+        MAX_SIZE = 5 * 1024 * 1024  # 5 MB
+        if size > MAX_SIZE:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="File size exceeds limit of 5MB."
+            )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to check file size: {str(e)}"
         )
 
     # Check MIME content type
@@ -196,6 +229,22 @@ async def register_farmer(
                 os.remove(absolute_path)
             except Exception:
                 pass
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Database error: {str(e)}"
+        )
+
+
+@app.get(
+    "/api/crops",
+    response_model=List[CropResponse],
+    status_code=status.HTTP_200_OK
+)
+def fetch_crops():
+    try:
+        crops = get_all_crops()
+        return crops
+    except sqlite3.Error as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Database error: {str(e)}"
