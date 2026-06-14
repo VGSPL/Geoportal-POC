@@ -49,3 +49,9 @@ pnpm-debug.log*
 # OS files
 .DS_Store
 Thumbs.db
+
+uploads/
+__pycache__/
+
+# Database
+*.db
