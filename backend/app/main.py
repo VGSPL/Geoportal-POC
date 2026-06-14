@@ -7,14 +7,15 @@ import json
 from typing import List
 from pydantic import ValidationError
 
-from app.models import FarmerRegistrationRequest, FarmerRegistrationResponse, CropTypeEnum, CropResponse
+from app.models import FarmerRegistrationRequest, FarmerRegistrationResponse, CropTypeEnum, CropResponse, FarmerDetailsResponse
 from app.services.database import (
     init_db,
     save_or_update_farmer,
     get_db_connection,
     generate_unique_farmer_id,
     DB_DIR,
-    get_all_crops
+    get_all_crops,
+    get_farmer_by_mobile
 )
 
 
@@ -249,3 +250,43 @@ def fetch_crops():
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Database error: {str(e)}"
         )
+
+
+@app.get(
+    "/api/farmers/mobile/{mobile_number}",
+    response_model=FarmerDetailsResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Get farmer details by mobile number",
+    description=(
+        "Fetches a farmer's full profile – including their assigned crops – "
+        "using their 10-digit mobile number. Returns 404 if no farmer is found."
+    ),
+    responses={
+        200: {"description": "Farmer found – returns full profile with nested crops"},
+        404: {"description": "No farmer registered with the given mobile number"},
+        422: {"description": "Validation error – mobile number must be exactly 10 digits"},
+    },
+)
+def get_farmer_by_mobile_number(mobile_number: str):
+    # Validate: must be exactly 10 decimal digits
+    if not mobile_number.isdigit() or len(mobile_number) != 10:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="mobile_number must be a 10-digit numeric string.",
+        )
+
+    try:
+        farmer = get_farmer_by_mobile(mobile_number)
+    except sqlite3.Error as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Database error: {str(e)}",
+        )
+
+    if farmer is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No farmer found with mobile number {mobile_number}.",
+        )
+
+    return farmer

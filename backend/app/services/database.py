@@ -3,7 +3,7 @@ import os
 import secrets
 import string
 import uuid
-from typing import List
+from typing import List, Optional, Dict, Any
 from app.models import FarmerRegistrationRequest
 
 
@@ -202,6 +202,71 @@ def get_all_crops() -> List[dict]:
         cursor.execute("SELECT id, crop_name FROM crops_master ORDER BY id ASC")
         rows = cursor.fetchall()
         return [dict(row) for row in rows]
+    except sqlite3.Error as e:
+        raise e
+    finally:
+        conn.close()
+
+
+def get_farmer_by_mobile(mobile_number: str) -> Optional[Dict[str, Any]]:
+    """
+    Fetches a farmer's full profile (including their assigned crops) by mobile number.
+
+    Uses a single LEFT JOIN across farmers → farmer_crops → crops_master to
+    avoid N+1 query issues.  Returns a nested dict ready for FarmerDetailsResponse,
+    or None when no farmer with that mobile number exists.
+    """
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+
+        # One query: farmer row + all crop mappings via JOIN
+        cursor.execute(
+            """
+            SELECT
+                f.id            AS farmer_id,
+                f.farmer_name,
+                f.mobile_number,
+                f.crop_type,
+                f.latitude,
+                f.longitude,
+                f.selfie_path,
+                cm.id           AS crop_id,
+                cm.crop_name
+            FROM farmers f
+            LEFT JOIN farmer_crops fc ON fc.farmer_id = f.id
+            LEFT JOIN crops_master  cm ON cm.id = fc.crop_id
+            WHERE f.mobile_number = ?
+            ORDER BY cm.id ASC
+            """,
+            (mobile_number,)
+        )
+        rows = cursor.fetchall()
+
+        if not rows:
+            return None
+
+        # All rows share the same farmer data – extract from the first row
+        first = rows[0]
+        farmer: Dict[str, Any] = {
+            "farmer_id":     first["farmer_id"],
+            "farmer_name":   first["farmer_name"],
+            "mobile_number": first["mobile_number"],
+            "crop_type":     first["crop_type"],
+            "latitude":      first["latitude"],
+            "longitude":     first["longitude"],
+            "selfie_url":    f"/{first['selfie_path']}" if first["selfie_path"] else None,
+            "crops":         [],
+        }
+
+        # Collect crop entries (LEFT JOIN may produce a single NULL row if no crops)
+        for row in rows:
+            if row["crop_id"] is not None:
+                farmer["crops"].append(
+                    {"id": row["crop_id"], "crop_name": row["crop_name"]}
+                )
+
+        return farmer
     except sqlite3.Error as e:
         raise e
     finally:

@@ -1,6 +1,6 @@
 from pydantic import BaseModel, Field, field_validator
 from enum import Enum
-from typing import List
+from typing import List, Optional
 
 
 class CropTypeEnum(str, Enum):
@@ -68,5 +68,35 @@ class FarmerRegistrationResponse(BaseModel):
 
 
 class CropResponse(BaseModel):
-    id: int
-    crop_name: str
+    """A single crop entry returned in farmer details."""
+
+    id: int = Field(..., description="Unique crop ID from crops_master")
+    crop_name: str = Field(..., description="Name of the crop")
+
+
+class FarmerDetailsResponse(BaseModel):
+    """Full farmer profile returned when fetching by mobile number."""
+
+    farmer_id: str = Field(
+        ...,
+        description="Unique farmer identifier, e.g. FARMER-XXXXXX",
+        examples=["FARMER-A1B2C3"],
+    )
+    farmer_name: str = Field(..., description="Full name of the farmer")
+    mobile_number: str = Field(
+        ...,
+        pattern=r"^\d{10}$",
+        description="10-digit farmer mobile number",
+    )
+    crop_type: CropTypeEnum = Field(..., description="Crop season type (Rabi / Kharif / Zaid)")
+    latitude: float = Field(..., ge=-90.0, le=90.0, description="Farmer location latitude")
+    longitude: float = Field(..., ge=-180.0, le=180.0, description="Farmer location longitude")
+    selfie_url: Optional[str] = Field(
+        None,
+        description="Relative URL path to the farmer selfie image",
+        examples=["/uploads/selfies/FARMER-A1B2C3.jpg"],
+    )
+    crops: List[CropResponse] = Field(
+        default_factory=list,
+        description="List of crops assigned to the farmer",
+    )
