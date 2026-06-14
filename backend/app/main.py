@@ -143,10 +143,18 @@ async def register_farmer(
         )
 
     # Check MIME content type
-    if selfie.content_type not in ["image/jpeg", "image/png", "image/jpg"]:
+    # Note: MIME type is client-provided and can vary (image/jpeg, image/jpg, image/pjpeg, etc.)
+    ALLOWED_MIME_TYPES = {
+        "image/jpeg",
+        "image/jpg",
+        "image/png",
+        "image/pjpeg",       # older IE/some browsers for JPEG
+        "application/octet-stream",  # some clients send raw binary without MIME
+    }
+    if selfie.content_type not in ALLOWED_MIME_TYPES:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Unsupported media type. File must be a JPEG or PNG image."
+            detail=f"Unsupported media type '{selfie.content_type}'. File must be a JPEG (JPG) or PNG image."
         )
 
     # 4. Check if the farmer already exists (by mobile_number) to get their ID and old selfie_path
