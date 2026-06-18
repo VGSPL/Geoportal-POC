@@ -70,18 +70,50 @@ def init_db():
         CREATE TABLE IF NOT EXISTS crops_master (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             crop_name TEXT UNIQUE NOT NULL,
+            crop_name_en TEXT,
+            crop_name_hi TEXT,
+            crop_name_mr TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
 
-    # Seed default crop data (idempotent insert logic)
+    cursor.execute("PRAGMA table_info(crops_master)")
+    crop_columns = {row["name"] for row in cursor.fetchall()}
+    for column_name in ("crop_name_en", "crop_name_hi", "crop_name_mr"):
+        if column_name not in crop_columns:
+            cursor.execute(f"ALTER TABLE crops_master ADD COLUMN {column_name} TEXT")
+
+    # Seed default crop data (idempotent insert/update logic)
     default_crops = [
-        "Cotton", "Rice", "Wheat", "Carrot", "Onion",
-        "Soybean", "Sugarcane", "Maize", "Tomato", "Potato"
+        ("Cotton", "कपास", "कापूस"),
+        ("Rice", "चावल", "तांदूळ"),
+        ("Wheat", "गेहूं", "गहू"),
+        ("Carrot", "गाजर", "गाजर"),
+        ("Onion", "प्याज", "कांदा"),
+        ("Soybean", "सोयाबीन", "सोयाबीन"),
+        ("Sugarcane", "गन्ना", "ऊस"),
+        ("Maize", "मक्का", "मका"),
+        ("Tomato", "टमाटर", "टोमॅटो"),
+        ("Potato", "आलू", "बटाटा"),
     ]
     cursor.executemany(
-        "INSERT OR IGNORE INTO crops_master (crop_name) VALUES (?)",
-        [(crop,) for crop in default_crops]
+        """
+        INSERT OR IGNORE INTO crops_master (
+            crop_name, crop_name_en, crop_name_hi, crop_name_mr
+        ) VALUES (?, ?, ?, ?)
+        """,
+        [(en, en, hi, mr) for en, hi, mr in default_crops]
+    )
+    cursor.executemany(
+        """
+        UPDATE crops_master
+        SET crop_name_en = ?,
+            crop_name_hi = ?,
+            crop_name_mr = ?
+        WHERE crop_name = ?
+           OR crop_name_en = ?
+        """,
+        [(en, hi, mr, en, en) for en, hi, mr in default_crops]
     )
 
     conn.commit()
@@ -199,9 +231,27 @@ def get_all_crops() -> List[dict]:
     conn = get_db_connection()
     try:
         cursor = conn.cursor()
-        cursor.execute("SELECT id, crop_name FROM crops_master ORDER BY id ASC")
+        cursor.execute("""
+            SELECT
+                id,
+                COALESCE(crop_name_en, crop_name) AS crop_name_en,
+                COALESCE(crop_name_hi, crop_name) AS crop_name_hi,
+                COALESCE(crop_name_mr, crop_name) AS crop_name_mr
+            FROM crops_master
+            ORDER BY id ASC
+        """)
         rows = cursor.fetchall()
-        return [dict(row) for row in rows]
+        return [
+            {
+                "id": row["id"],
+                "crop_name": {
+                    "en": row["crop_name_en"],
+                    "hi": row["crop_name_hi"],
+                    "mr": row["crop_name_mr"],
+                },
+            }
+            for row in rows
+        ]
     except sqlite3.Error as e:
         raise e
     finally:

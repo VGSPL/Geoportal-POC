@@ -67,6 +67,12 @@ class FarmerRegistrationResponse(BaseModel):
     mobile_number: str
 
 
+class CropName(BaseModel):
+    en: str
+    hi: str
+    mr: str
+
+
 class CropResponse(BaseModel):
     id: int
-    crop_name: str
+    crop_name: CropName
