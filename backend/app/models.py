@@ -67,11 +67,17 @@ class FarmerRegistrationResponse(BaseModel):
     mobile_number: str
 
 
+class CropName(BaseModel):
+    en: str
+    hi: str
+    mr: str
+
+
 class CropResponse(BaseModel):
     """A single crop entry returned in farmer details."""
 
     id: int = Field(..., description="Unique crop ID from crops_master")
-    crop_name: str = Field(..., description="Name of the crop")
+    crop_name: CropName = Field(..., description="Multilingual crop name")
 
 
 class FarmerDetailsResponse(BaseModel):
